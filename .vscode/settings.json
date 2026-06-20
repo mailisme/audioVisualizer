@@ -1,0 +1,17 @@
+{  
+    "C_Cpp.default.includePath": [  // C/C++ 扩展的默认头文件搜索路径  
+        "${workspaceFolder}/include", // 项目中包含头文件的路径  
+        "${workspaceFolder}/libs/imgui" // ImGui 库的头文件路径  
+    ],  
+    "C_Cpp.default.Definition": [   // C/C++ 扩展的默认宏定义路径  
+        "${workspaceFolder}/include" // 需要使用宏定义的头文件路径  
+    ],  
+    "C_Cpp.errorSquiggles": "disabled", // 禁用错误波浪线提示  
+    "C_Cpp.intelliSenseEngine": "default", // 使用默认的智能感知引擎  
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json", // 指定编译命令 JSON 文件的路径（用于基于 CMake 或其他构建系统时提供编译信息）  
+    "files.associations": {            // 文件类型关联设置  
+        "*.cpp": "cpp",                // 将所有 .cpp 文件识别为 C++ 文件  
+        "*.h": "cpp",                  // 将所有 .h 文件识别为 C++ 文件（兼容 C++ 头文件）  
+        "vector": "cpp"                // 将名为 vector 的文件/模块识别为 C++ 类型（通常是 STL 的一部分）  
+    }  
+}
