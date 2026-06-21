@@ -1,29 +1,81 @@
-// Dear ImGui: standalone example application for SDL3 + SDL_Renderer
-// (SDL is a cross-platform general purpose library for handling windows, inputs, OpenGL/Vulkan/Metal graphics context creation, etc.)
-
-// Learn about Dear ImGui:
-// - FAQ                  https://dearimgui.com/faq
-// - Getting Started      https://dearimgui.com/getting-started
-// - Documentation        https://dearimgui.com/docs (same as your local docs/ folder).
-// - Introduction, links and more at the top of imgui.cpp
-
-// Important to understand: SDL_Renderer is an _optional_ component of SDL3.
-// For a multi-platform app consider using e.g. SDL+DirectX on Windows and SDL+OpenGL on Linux/OSX.
-
 #include "imgui.h"
 #include "../libs/imgui/backends/imgui_impl_sdl3.h"
 #include "../libs/imgui/backends/imgui_impl_sdlrenderer3.h"
 #include <stdio.h>
+#include <algorithm>
+#include <iostream>
 #include <SDL3/SDL.h>
+#include <thread>
+#include <atomic>
+#include <vector>
+#define MINIAUDIO_IMPLEMENTATION
+#include "../libs/miniaudio/miniaudio.h"
+
 
 #ifdef __EMSCRIPTEN__
 #include "../libs/emscripten/emscripten_mainloop_stub.h"
 #endif
 
-// Main code
+
+// init
+int periodSizeInFrames = 960;
+std::atomic<float> gRMS = 0.0f;
+std::vector<float> audioBuffer;
+std::vector<float> audioVolume;
+std::atomic<int> buffer_write_index = 0;
+std::atomic<int> volume_write_index = 0;
+const int BUFFER_SIZE = 192000;
+const int FFT_SIZE = 2048;
+std::atomic<float> gFreq = 0;
+std::thread analysis;
+
+
+
+
+// fft
+
+
+
+
+
+
+
+
+//audio loopback code
+
+void data_callback(ma_device* device, void* output, const void* input, ma_uint32 frameCount)
+{
+    const float* samples = (const float*)input;
+
+    float sum, peak = 0;
+
+    //get peak
+    for (ma_uint32 i = 0; i < frameCount * 2; i++)
+    {
+        float s = samples[i];
+        sum += s * s;
+
+        int idx = buffer_write_index.fetch_add(1) % BUFFER_SIZE;
+        audioBuffer[idx] = samples[i];
+
+        if (s > peak){
+            peak = s;
+        }
+    }
+    float rms = sqrtf(sum / (frameCount * 2));
+    gRMS.store(rms);
+
+    int idx2 = volume_write_index.fetch_add(1) % (BUFFER_SIZE / periodSizeInFrames);
+    audioVolume[idx2] = rms;
+
+    (void)device;
+    (void)output;
+}
+
+
+
 int main(int, char**)
 {
-    // Setup SDL
     // [If using SDL_MAIN_USE_CALLBACKS: all code below until the main loop starts would likely be your SDL_AppInit() function]
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
     {
@@ -31,16 +83,50 @@ int main(int, char**)
         return 1;
     }
 
-    // Create window with SDL_Renderer graphics context
+
+    // fft threads
+
+
+
+
+
+    //Audio Loopback Capture Init
+    audioBuffer.resize(BUFFER_SIZE);
+    audioVolume.resize(BUFFER_SIZE / periodSizeInFrames);
+    ma_device_config config =
+        ma_device_config_init(
+            ma_device_type_loopback
+        );
+
+    config.capture.format = ma_format_f32;
+    config.capture.channels = 2;
+    config.sampleRate = 48000;
+    config.periodSizeInFrames = periodSizeInFrames;
+
+    config.dataCallback = data_callback;
+
+    ma_device device;
+
+    if (ma_device_init(
+        nullptr,
+        &config,
+        &device
+    ) != MA_SUCCESS)
+    {
+        printf("failed when trying to get loopback");
+    }
+
+    ma_device_start(&device);
+
+
+
 
     SDL_Rect rect;
     SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &rect);
-
     int w = rect.w;
     int h = rect.h;
-    
     float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-    SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY  | SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP;
+    SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN | SDL_WINDOW_UTILITY | SDL_WINDOW_HIGH_PIXEL_DENSITY  | SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP;
     SDL_Window* window = SDL_CreateWindow("Dear ImGui SDL3+SDL_Renderer example", (int)(w), (int)(h / 7), window_flags);
 
     SDL_SetWindowPosition(window, 0, h - (h / 7));
@@ -63,45 +149,25 @@ int main(int, char**)
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;         // Enable Docking
-
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;    
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;        
     // Setup Dear ImGui style
     ImGui::StyleColorsDark();
-    //ImGui::StyleColorsLight();
 
     // Setup scaling
     ImGuiStyle& style = ImGui::GetStyle();
-    style.ScaleAllSizes(main_scale * 0.8);        // Bake a fixed style scale. (until we have a solution for dynamic style scaling, changing this requires resetting Style + calling this again)
-    style.FontScaleDpi = main_scale * 0.8;        // Set initial font scale. (in docking branch: using io.ConfigDpiScaleFonts=true automatically overrides this for every window depending on the current monitor)
-    //io.ConfigDpiScaleFonts = true;        // [Experimental] Automatically overwrite style.FontScaleDpi in Begin() when Monitor DPI changes. This will scale fonts but _NOT_ scale sizes/padding for now.
-    //io.ConfigDpiScaleViewports = true;    // [Experimental] Scale Dear ImGui and Platform Windows when Monitor DPI changes.
+    style.ScaleAllSizes(main_scale * 0.8);        
+    style.FontScaleDpi = main_scale * 0.8;       
 
     // Setup Platform/Renderer backends
     ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
     ImGui_ImplSDLRenderer3_Init(renderer);
 
-    // Load Fonts
-    // - If fonts are not explicitly loaded, Dear ImGui will select an embedded font: either AddFontDefaultVector() or AddFontDefaultBitmap().
-    //   This selection is based on (style.FontSizeBase * style.FontScaleMain * style.FontScaleDpi) reaching a small threshold.
-    // - You can load multiple fonts and use ImGui::PushFont()/PopFont() to select them.
-    // - If a file cannot be loaded, AddFont functions will return a nullptr. Please handle those errors in your code (e.g. use an assertion, display an error and quit).
-    // - Read 'docs/FONTS.md' for more instructions and details.
-    // - Use '#define IMGUI_ENABLE_FREETYPE' in your imconfig file to use FreeType for higher quality font rendering.
-    // - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
-    //style.FontSizeBase = 20.0f;
-    //io.Fonts->AddFontDefaultVector();
-    //io.Fonts->AddFontDefaultBitmap();
-    //io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\segoeui.ttf");
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf");
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf");
-    //io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf");
-    //ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf");
-    //IM_ASSERT(font != nullptr);
-
-    // Our state
+    // state
     bool setting = false;
+    bool volume = true;
+    bool volume_history = false;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
     // Main loop
@@ -115,12 +181,6 @@ int main(int, char**)
     while (!done)
 #endif
     {
-        // Poll and handle events (inputs, window resize, etc.)
-        // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your inputs.
-        // - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application, or clear/overwrite your copy of the mouse data.
-        // - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application, or clear/overwrite your copy of the keyboard data.
-        // Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
-        // [If using SDL_MAIN_USE_CALLBACKS: call ImGui_ImplSDL3_ProcessEvent() from your SDL_AppEvent() function]
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
@@ -138,9 +198,10 @@ int main(int, char**)
             continue;
         }
 
+
         // Start the Dear ImGui frame
         ImGui_ImplSDLRenderer3_NewFrame();
-        ImGui_ImplSDL3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();  
         ImGui::NewFrame();
 
         // Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
@@ -160,6 +221,8 @@ int main(int, char**)
             {
                 setting = !setting;
             }
+            ImGui::Text("%.1f FPS",io.Framerate);
+            ImGui::Text("%f Hz", gFreq.load());
             ImGui::End();
         }
 
@@ -168,6 +231,9 @@ int main(int, char**)
         {
 
             ImGui::Begin("setting", &setting);
+            ImGui::Checkbox("volume bar", &volume);
+            ImGui::Checkbox("volume History", &volume_history);
+            // ImGui::ListBox()
             ImGui::End();
         }
 
@@ -176,6 +242,69 @@ int main(int, char**)
         SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
         SDL_SetRenderDrawColorFloat(renderer, clear_color.x, clear_color.y, clear_color.z, clear_color.w);
         SDL_RenderClear(renderer);
+
+        //sdl render
+        if (volume){
+            float RMS = gRMS.load();
+
+            static float displayPeak = 0.0f;
+
+            float db = 20.0f * log10f(RMS);
+
+            if (db > displayPeak)
+            {
+                displayPeak += (db - displayPeak) * 0.5f;
+            }
+            else
+            {
+                displayPeak += (db - displayPeak) * 0.05f;
+            }
+            float visual = (db + 60.0f) / 60.0f;
+
+            int width = w / 100;
+            int height = h / 7;
+
+            int barHeight = (int)(visual * height);
+
+            SDL_FRect rect = {
+                (float)w - width,
+                (float)height-barHeight,
+                (float)width,
+                (float)barHeight
+            };
+            SDL_SetRenderDrawColor(renderer, 0, 100, 200, 255);
+            SDL_RenderFillRect(renderer, &rect);
+        }
+        
+
+        if (volume_history){        
+            int writeIndex = volume_write_index.load();
+            int size = audioVolume.size();
+
+            for (int i = 0; i < size; i++)
+            {
+                int idx = (writeIndex - i + size) % size;
+
+                float sample = (20.0f * log10f(audioVolume[idx]) + 60.0f) / 60.0f;
+
+
+                int width = (w / 100) + ((i) * w * 0.001);
+                int height = h / 7;
+                int barHeight = (int)(sample * height);
+
+                SDL_FRect rect = {
+                    (float)w - width,
+                    (float)height - barHeight,
+                    (float)(w * 0.001),
+                    (float)barHeight
+                };
+
+                SDL_SetRenderDrawColor(renderer, 0, 150, 100, 255); 
+                SDL_RenderFillRect(renderer, &rect);
+            }
+        }
+
+
         ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
         SDL_RenderPresent(renderer);
     }
@@ -188,6 +317,8 @@ int main(int, char**)
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
+
+    ma_device_uninit(&device);
 
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);

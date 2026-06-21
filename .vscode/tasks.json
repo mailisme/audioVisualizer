@@ -17,6 +17,7 @@
                 "-static",             // 静态链接，用于不依赖 DLL
                 "-L\\ucrt64\\lib",
                 "-lSDL3",
+                "-lportaudio",
                 "-luser32",
                 "-lgdi32",
                 "-lwinmm",
@@ -26,7 +27,7 @@
                 "-lsetupapi",
                 "-lversion",
                 "-loleaut32",
-                "-Wl,-subsystem,windows"
+                // "-Wl,-subsystem,windows"
             ],
             "options": {
                 "cwd": "c:\\msys64\\ucrt64\\bin"
