@@ -10,6 +10,8 @@
 #include <vector>
 #define MINIAUDIO_IMPLEMENTATION
 #include "../libs/miniaudio/miniaudio.h"
+#include "fft.h"
+#include "draw_line.h"
 
 
 #ifdef __EMSCRIPTEN__
@@ -28,27 +30,64 @@ const int BUFFER_SIZE = 192000;
 const int FFT_SIZE = 2048;
 std::atomic<float> gFreq = 0;
 std::thread analysis;
-
+int sampleRate = 48000;
 
 
 
 // fft
+std::thread fftThread;
+void FFTThread(int sampleRate)
+{
+    const int N = 2048;
+    std::vector<float> frame(N);
 
+    while (true)
+    {
+        int current = buffer_write_index.load();
 
+        int size = audioBuffer.size() / 2;
+        if (size < N)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            continue;
+        }
 
+        for (int i = 0; i < N; i++)
+        {
+            int base = current - N + i;
 
+            if (base < 0)
+                base += size;
 
+            base %= size;
 
+            int idx = base * 2;
 
+            float l = audioBuffer[idx];
+            float r = audioBuffer[idx + 1];
 
+            frame[i] = (l + r) * 0.5f;
+        }
+
+        float freq = getFundamental(frame, sampleRate);
+
+        static float smooth = 0;
+        smooth = 0.9f * smooth + 0.1f * freq;
+
+        gFreq.store(smooth);
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
+            
 //audio loopback code
 
 void data_callback(ma_device* device, void* output, const void* input, ma_uint32 frameCount)
 {
     const float* samples = (const float*)input;
 
-    float sum, peak = 0;
-
+    float sum = 0.0f, peak = 0.0f;
     //get peak
     for (ma_uint32 i = 0; i < frameCount * 2; i++)
     {
@@ -85,9 +124,8 @@ int main(int, char**)
 
 
     // fft threads
-
-
-
+    fftThread = std::thread(FFTThread, sampleRate);
+    fftThread.detach();
 
 
     //Audio Loopback Capture Init
@@ -223,6 +261,7 @@ int main(int, char**)
             }
             ImGui::Text("%.1f FPS",io.Framerate);
             ImGui::Text("%f Hz", gFreq.load());
+            ImGui::Text("%f dB", 20.0f * log10f(gRMS.load()));
             ImGui::End();
         }
 
@@ -299,15 +338,24 @@ int main(int, char**)
                     (float)barHeight
                 };
 
+
+
+
                 SDL_SetRenderDrawColor(renderer, 0, 150, 100, 255); 
                 SDL_RenderFillRect(renderer, &rect);
             }
         }
 
 
+        drawThickLine(renderer, 0, 0, w, h / 7, 5, {255,255,255,255});
+
         ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
         SDL_RenderPresent(renderer);
     }
+
+
+
+
 #ifdef __EMSCRIPTEN__
     EMSCRIPTEN_MAINLOOP_END;
 #endif
