@@ -1,5 +1,6 @@
 #include <SDL3/SDL.h>
 #include <cmath>
+#include <iostream>
 
 SDL_FColor toFColor(SDL_Color a)
 {

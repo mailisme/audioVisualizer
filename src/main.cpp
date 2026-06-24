@@ -205,7 +205,7 @@ int main(int, char**)
     // state
     bool setting = false;
     bool volume = true;
-    bool volume_history = false;
+    bool volume_history = true;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
     // Main loop
@@ -338,17 +338,49 @@ int main(int, char**)
                     (float)barHeight
                 };
 
-
-
-
                 SDL_SetRenderDrawColor(renderer, 0, 150, 100, 255); 
                 SDL_RenderFillRect(renderer, &rect);
             }
         }
 
 
-        drawThickLine(renderer, 0, 0, w, h / 7, 5, {255,255,255,255});
+        
 
+        float otherWidth = w / 100 + w * audioVolume.size() * 0.001;
+        int N = sampleRate / gFreq.load();
+        if (N < 16) N = 16;
+        if (N > 4096) N = 4096;
+        int current = buffer_write_index.load();
+        int size = audioBuffer.size() / 2;
+        float ybase = h / 14;
+
+        // std::cout << "freq: " << gFreq.load() << ", N: " << N << std::endl;
+        drawThickLine(renderer, w - otherWidth, 0, w - otherWidth, h / 7, 2, {255,255,255,255});
+        drawThickLine(renderer, w - 2*otherWidth, 0, w - 2*otherWidth, h / 7, 2, {255,255,255,255});
+        for (int i = 0; i < N; i++){
+            int base = current - N + i;
+
+            if (base < 0)
+                base += size;
+
+            base %= size;
+
+            int idx = base * 2;
+
+            float l = audioBuffer[idx];
+            float r = audioBuffer[idx + 1];
+
+            drawThickLine(renderer, otherWidth * (i + 1) / N + (w - 2 * otherWidth), ybase + ybase * (l + r) * 0.5f, (otherWidth * (i + 1) / N + (w - 2 * otherWidth)) + 1, (ybase + ybase * (l + r) * 0.5f) + 1, 2, {255,255,255,255});
+            // std::cout << otherWidth * (i + 1) / N + (w - 2 * otherWidth) << "\n" << ybase + ybase * (l + r) * 0.5f << "\n";
+        }
+
+
+
+
+
+
+
+        //render everything out
         ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
         SDL_RenderPresent(renderer);
     }
