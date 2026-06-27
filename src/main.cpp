@@ -34,6 +34,7 @@ int sampleRate = 48000;
 
 
 
+
 // fft
 std::thread fftThread;
 void FFTThread(int sampleRate)
@@ -110,7 +111,9 @@ void data_callback(ma_device* device, void* output, const void* input, ma_uint32
     (void)device;
     (void)output;
 }
-
+void silent_playback_callback(ma_device* device, void* output, const void*, ma_uint32 frameCount){
+    memset(output, 0, frameCount * ma_get_bytes_per_frame(device->playback.format, device->playback.channels));
+}
 
 
 int main(int, char**)
@@ -145,6 +148,7 @@ int main(int, char**)
 
     ma_device device;
 
+
     if (ma_device_init(
         nullptr,
         &config,
@@ -155,6 +159,22 @@ int main(int, char**)
     }
 
     ma_device_start(&device);
+
+    ma_device silentDevice;
+    ma_device_config silentConfig = ma_device_config_init(ma_device_type_playback);
+    silentConfig.playback.format   = ma_format_f32;
+    silentConfig.playback.channels = 2;
+    silentConfig.sampleRate        = 48000;
+    silentConfig.dataCallback      = silent_playback_callback;
+
+    if (ma_device_init(nullptr, &silentConfig, &silentDevice) != MA_SUCCESS)
+    {
+        printf("failed to init silent keep-alive device");
+    }
+    else
+    {
+        ma_device_start(&silentDevice);
+    }
 
 
 
@@ -206,7 +226,11 @@ int main(int, char**)
     bool setting = false;
     bool volume = true;
     bool volume_history = true;
+    bool oscilloscope = true;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+    float silenceHoldTimer = 0.0f;
+    const float SILENCE_THRESHOLD = -60.0f;
+    const float SILENCE_HOLD_TIME    = 0.05f; 
 
     // Main loop
     bool done = false;
@@ -272,6 +296,7 @@ int main(int, char**)
             ImGui::Begin("setting", &setting);
             ImGui::Checkbox("volume bar", &volume);
             ImGui::Checkbox("volume History", &volume_history);
+            ImGui::Checkbox("oscilloscope", &oscilloscope);
             // ImGui::ListBox()
             ImGui::End();
         }
@@ -345,39 +370,67 @@ int main(int, char**)
 
 
         
+        if(oscilloscope){
+            float otherWidth = w / 100 + w * audioVolume.size() * 0.001;
+            const int SEARCH = 2048;
+            float freq = gFreq.load();
+            int N = 2048;
+            const int DRAW = (freq > 1.0f) ? std::clamp((int)(sampleRate / freq), 8, N) : N;
+            int current = buffer_write_index.load();
+            int size = audioBuffer.size() / 2;
+            float ybase = h / 14;
+            std::vector<float> frame(N);
 
-        float otherWidth = w / 100 + w * audioVolume.size() * 0.001;
-        int N = sampleRate / gFreq.load();
-        if (N < 16) N = 16;
-        if (N > 4096) N = 4096;
-        int current = buffer_write_index.load();
-        int size = audioBuffer.size() / 2;
-        float ybase = h / 14;
+            // std::cout << "freq: " << gFreq.load() << ", N: " << N << std::endl;
+            drawThickLine(renderer, w - otherWidth, 0, w - otherWidth, h / 7, 2, {255,255,255,255});
+            drawThickLine(renderer, w - 2*otherWidth,   0, w - 2*otherWidth, h / 7, 2, {255,255,255,255});
+            for (int i = 0; i < N; i++){
+                int base = current - N + i;
 
-        // std::cout << "freq: " << gFreq.load() << ", N: " << N << std::endl;
-        drawThickLine(renderer, w - otherWidth, 0, w - otherWidth, h / 7, 2, {255,255,255,255});
-        drawThickLine(renderer, w - 2*otherWidth, 0, w - 2*otherWidth, h / 7, 2, {255,255,255,255});
-        for (int i = 0; i < N; i++){
-            int base = current - N + i;
+                if (base < 0)
+                    base += size;
 
-            if (base < 0)
-                base += size;
+                base %= size;
 
-            base %= size;
+                int idx = base * 2;
 
-            int idx = base * 2;
+                float l = audioBuffer[idx];
+                float r = audioBuffer[idx + 1];
+                frame[i] = (l + r) * 0.5f;
+                
+                            // std::cout << otherWidth * (i + 1) / N + (w - 2 * otherWidth) << "\n" << ybase + ybase * (l + r) * 0.5f << "\n";
+            }
 
-            float l = audioBuffer[idx];
-            float r = audioBuffer[idx + 1];
+            int trigger = N - DRAW;
 
-            drawThickLine(renderer, otherWidth * (i + 1) / N + (w - 2 * otherWidth), ybase + ybase * (l + r) * 0.5f, (otherWidth * (i + 1) / N + (w - 2 * otherWidth)) + 1, (ybase + ybase * (l + r) * 0.5f) + 1, 2, {255,255,255,255});
-            // std::cout << otherWidth * (i + 1) / N + (w - 2 * otherWidth) << "\n" << ybase + ybase * (l + r) * 0.5f << "\n";
-        }
+            for (int i = current - SEARCH; i < N - 1; i++)
+            {
+                float a = frame[(i + frame.size()) % frame.size()];
+                float b = frame[(i + 1 + frame.size()) % frame.size()];
 
+                if (a < 0 && b >= 0 && fabs(b-a) > 0.02f)
+                {
+                    trigger = i;
+                }
+            }
 
+            float db = 20.0f * log10f(std::max(gRMS.load(), 1e-6f));
+            if (db > SILENCE_THRESHOLD)
+                silenceHoldTimer = SILENCE_HOLD_TIME;
+            else
+                silenceHoldTimer -= io.DeltaTime;
 
+            bool hasLiveAudio = silenceHoldTimer > 0.0f;
 
-
+            for (int i = 0; i < DRAW; i++){
+                if (hasLiveAudio) {
+                    drawThickLine(renderer, w - 2*otherWidth + i*otherWidth / DRAW, ybase + ybase * frame[(trigger + i) % frame.size()], w - 2*otherWidth + (i+1)*otherWidth / DRAW, ybase + ybase * frame[(trigger + i + 1) % frame.size()], 1, {255,255,255,255});
+                } 
+                else {
+                    drawThickLine(renderer, w - 2*otherWidth + i*otherWidth / DRAW, ybase, w - 2*otherWidth + (i+1)*otherWidth / DRAW, ybase, 1, {255,255,255,255});
+                }
+            }
+        }    
 
 
         //render everything out
@@ -392,13 +445,14 @@ int main(int, char**)
     EMSCRIPTEN_MAINLOOP_END;
 #endif
 
-    // Cleanup
+    // Cleanup  
     // [If using SDL_MAIN_USE_CALLBACKS: all code below would likely be your SDL_AppQuit() function]
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
 
     ma_device_uninit(&device);
+    ma_device_uninit(&silentDevice);
 
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);

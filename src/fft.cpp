@@ -11,7 +11,7 @@ float getFundamental(const std::vector<float>& frame, int sampleRate)
     int N = static_cast<int>(frame.size());
 
     int minBin = (int)(20.0f * N / sampleRate);
-    int maxBin = (int)(300.0f * N / sampleRate);
+    int maxBin = (int)(220.0f * N / sampleRate);
 
     kiss_fft_cfg cfg = kiss_fft_alloc(N, 0, nullptr, nullptr);
 
