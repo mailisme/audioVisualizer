@@ -12,6 +12,7 @@
 #include "../libs/miniaudio/miniaudio.h"
 #include "fft.h"
 #include "draw_line.h"
+#include <deque>
 
 
 #ifdef __EMSCRIPTEN__
@@ -41,6 +42,8 @@ void FFTThread(int sampleRate)
 {
     const int N = 2048;
     std::vector<float> frame(N);
+    static std::deque<float> freqHistory;
+    const size_t HISTORY_SIZE = 5;
 
     while (true)
     {
@@ -72,8 +75,24 @@ void FFTThread(int sampleRate)
 
         float freq = getFundamental(frame, sampleRate);
 
-        static float smooth = 0;
-        smooth = 0.9f * smooth + 0.1f * freq;
+        if (freq > 1.0f)
+        {
+            freqHistory.push_back(freq);
+            if (freqHistory.size() > HISTORY_SIZE)
+                freqHistory.pop_front();
+        }
+
+        float median = 0.0f;
+        if (!freqHistory.empty())
+        {
+            std::vector<float> sorted(freqHistory.begin(), freqHistory.end());
+            std::sort(sorted.begin(), sorted.end());
+            median = sorted[sorted.size() / 2];
+        }
+
+        static float smooth = 0.0f;
+        if (median > 1.0f)
+            smooth = 0.7f * smooth + 0.3f * median;
 
         gFreq.store(smooth);
 
@@ -143,7 +162,7 @@ int main(int, char**)
     config.capture.channels = 2;
     config.sampleRate = 48000;
     config.periodSizeInFrames = periodSizeInFrames;
-
+    config.performanceProfile = ma_performance_profile_low_latency;
     config.dataCallback = data_callback;
 
     ma_device device;
@@ -166,7 +185,7 @@ int main(int, char**)
     silentConfig.playback.channels = 2;
     silentConfig.sampleRate        = 48000;
     silentConfig.dataCallback      = silent_playback_callback;
-
+    silentConfig.performanceProfile = ma_performance_profile_low_latency;
     if (ma_device_init(nullptr, &silentConfig, &silentDevice) != MA_SUCCESS)
     {
         printf("failed to init silent keep-alive device");
@@ -231,6 +250,7 @@ int main(int, char**)
     float silenceHoldTimer = 0.0f;
     const float SILENCE_THRESHOLD = -60.0f;
     const float SILENCE_HOLD_TIME    = 0.05f; 
+    float osc_trough_depth = 0.5f; 
 
     // Main loop
     bool done = false;
@@ -298,6 +318,7 @@ int main(int, char**)
             ImGui::Checkbox("volume History", &volume_history);
             ImGui::Checkbox("oscilloscope", &oscilloscope);
             // ImGui::ListBox()
+            ImGui::SliderFloat("oscilloscope depth", &osc_trough_depth, 0, 1, "");
             ImGui::End();
         }
 
@@ -402,17 +423,27 @@ int main(int, char**)
             }
 
             int trigger = N - DRAW;
+            int searchStart = std::max(0, N - SEARCH);
+            int searchLimit = N - DRAW - 1; 
 
-            for (int i = current - SEARCH; i < N - 1; i++)
+
+            bool armed = false; 
+            for (int i = searchStart; i < searchLimit - 1; i++)
             {
-                float a = frame[(i + frame.size()) % frame.size()];
-                float b = frame[(i + 1 + frame.size()) % frame.size()];
+                float a = frame[i];
+                float b = frame[i + 1];
 
-                if (a < 0 && b >= 0 && fabs(b-a) > 0.02f)
+                if (a < -osc_trough_depth)
+                    armed = true;
+
+                if (armed && a > 0 && b <= 0 && (a - b) > 0.02f)
                 {
                     trigger = i;
+                    armed = false;
                 }
             }
+            // std::cout << osc_trough_depth << std::endl;
+
 
             float db = 20.0f * log10f(std::max(gRMS.load(), 1e-6f));
             if (db > SILENCE_THRESHOLD)
