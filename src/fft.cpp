@@ -1,4 +1,4 @@
-// by chatgpt
+// by chatgpt im sorry
 
 #include "fft.h"
 #include "../libs/kissfft/kiss_fft.h"

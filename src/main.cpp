@@ -38,26 +38,22 @@ int sampleRate = 48000;
 
 // fft
 std::thread fftThread;
-void FFTThread(int sampleRate)
-{
+void FFTThread(int sampleRate){
     const int N = 2048;
     std::vector<float> frame(N);
     static std::deque<float> freqHistory;
     const size_t HISTORY_SIZE = 5;
 
-    while (true)
-    {
+    while (true){
         int current = buffer_write_index.load();
 
         int size = audioBuffer.size() / 2;
-        if (size < N)
-        {
+        if (size < N){
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
         }
 
-        for (int i = 0; i < N; i++)
-        {
+        for (int i = 0; i < N; i++){
             int base = current - N + i;
 
             if (base < 0)
@@ -75,16 +71,14 @@ void FFTThread(int sampleRate)
 
         float freq = getFundamental(frame, sampleRate);
 
-        if (freq > 1.0f)
-        {
+        if (freq > 1.0f){
             freqHistory.push_back(freq);
             if (freqHistory.size() > HISTORY_SIZE)
                 freqHistory.pop_front();
         }
 
         float median = 0.0f;
-        if (!freqHistory.empty())
-        {
+        if (!freqHistory.empty()){
             std::vector<float> sorted(freqHistory.begin(), freqHistory.end());
             std::sort(sorted.begin(), sorted.end());
             median = sorted[sorted.size() / 2];
@@ -103,14 +97,12 @@ void FFTThread(int sampleRate)
             
 //audio loopback code
 
-void data_callback(ma_device* device, void* output, const void* input, ma_uint32 frameCount)
-{
+void data_callback(ma_device* device, void* output, const void* input, ma_uint32 frameCount){
     const float* samples = (const float*)input;
 
     float sum = 0.0f, peak = 0.0f;
     //get peak
-    for (ma_uint32 i = 0; i < frameCount * 2; i++)
-    {
+    for (ma_uint32 i = 0; i < frameCount * 2; i++){
         float s = samples[i];
         sum += s * s;
 
@@ -135,11 +127,9 @@ void silent_playback_callback(ma_device* device, void* output, const void*, ma_u
 }
 
 
-int main(int, char**)
-{
+int main(int, char**){
     // [If using SDL_MAIN_USE_CALLBACKS: all code below until the main loop starts would likely be your SDL_AppInit() function]
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
-    {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)){
         printf("Error: SDL_Init(): %s\n", SDL_GetError());
         return 1;
     }
@@ -172,8 +162,7 @@ int main(int, char**)
         nullptr,
         &config,
         &device
-    ) != MA_SUCCESS)
-    {
+    ) != MA_SUCCESS){
         printf("failed when trying to get loopback");
     }
 
@@ -186,12 +175,10 @@ int main(int, char**)
     silentConfig.sampleRate        = 48000;
     silentConfig.dataCallback      = silent_playback_callback;
     silentConfig.performanceProfile = ma_performance_profile_low_latency;
-    if (ma_device_init(nullptr, &silentConfig, &silentDevice) != MA_SUCCESS)
-    {
+    if (ma_device_init(nullptr, &silentConfig, &silentDevice) != MA_SUCCESS){
         printf("failed to init silent keep-alive device");
     }
-    else
-    {
+    else{
         ma_device_start(&silentDevice);
     }
 
@@ -207,15 +194,13 @@ int main(int, char**)
     SDL_Window* window = SDL_CreateWindow("Dear ImGui SDL3+SDL_Renderer example", (int)(w), (int)(h / 7), window_flags);
 
     SDL_SetWindowPosition(window, 0, h - (h / 7));
-    if (window == nullptr)
-    {
+    if (window == nullptr){
         printf("Error: SDL_CreateWindow(): %s\n", SDL_GetError());
         return 1;
     }
     SDL_Renderer* renderer = SDL_CreateRenderer(window, nullptr);
     SDL_SetRenderVSync(renderer, 1);
-    if (renderer == nullptr)
-    {
+    if (renderer == nullptr){
         SDL_Log("Error: SDL_CreateRenderer(): %s\n", SDL_GetError());
         return 1;
     }
@@ -264,8 +249,7 @@ int main(int, char**)
 #endif
     {
         SDL_Event event;
-        while (SDL_PollEvent(&event))
-        {
+        while (SDL_PollEvent(&event)){
             ImGui_ImplSDL3_ProcessEvent(&event);
             if (event.type == SDL_EVENT_QUIT)
                 done = true;
@@ -274,8 +258,7 @@ int main(int, char**)
         }
 
         // [If using SDL_MAIN_USE_CALLBACKS: all code below would likely be your SDL_AppIterate() function]
-        if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED)
-        {
+        if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED){
             SDL_Delay(10);
             continue;
         }
@@ -295,11 +278,11 @@ int main(int, char**)
 
             ImGui::Begin("AudioVisualizer", nullptr, ImGuiWindowFlags_NoMove);
 
-            if (ImGui::Button("X"))                       // Buttons return true when clicked (most widgets return true when edited/activated)
+            if (ImGui::Button("X")) 
                 break;
             
             ImGui::SameLine();
-            if (ImGui::Button("Setting"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
+            if (ImGui::Button("Setting"))
             {
                 setting = !setting;
             }
@@ -310,8 +293,7 @@ int main(int, char**)
         }
 
         //setting
-        if (setting)
-        {
+        if (setting){
 
             ImGui::Begin("setting", &setting);
             ImGui::Checkbox("volume bar", &volume);
@@ -336,12 +318,10 @@ int main(int, char**)
 
             float db = 20.0f * log10f(RMS);
 
-            if (db > displayPeak)
-            {
+            if (db > displayPeak){
                 displayPeak += (db - displayPeak) * 0.5f;
             }
-            else
-            {
+            else{
                 displayPeak += (db - displayPeak) * 0.05f;
             }
             float visual = (db + 60.0f) / 60.0f;
@@ -366,8 +346,7 @@ int main(int, char**)
             int writeIndex = volume_write_index.load();
             int size = audioVolume.size();
 
-            for (int i = 0; i < size; i++)
-            {
+            for (int i = 0; i < size; i++){
                 int idx = (writeIndex - i + size) % size;
 
                 float sample = (20.0f * log10f(audioVolume[idx]) + 60.0f) / 60.0f;
@@ -428,8 +407,7 @@ int main(int, char**)
 
 
             bool armed = false; 
-            for (int i = searchStart; i < searchLimit - 1; i++)
-            {
+            for (int i = searchStart; i < searchLimit - 1; i++){
                 float a = frame[i];
                 float b = frame[i + 1];
 
